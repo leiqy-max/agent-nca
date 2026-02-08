@@ -1,0 +1,47 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>运维智能问答</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        #question { width: 100%; padding: 10px; font-size: 16px; }
+        #submit { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+        #answer { margin-top: 20px; padding: 10px; background-color: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+    <h1>运维智能问答</h1>
+    
+    <label for="question">请输入你的问题：</label><br><br>
+    <input type="text" id="question" name="question" placeholder="例如：系统A无法登录怎么办？" required>
+    <button id="submit">提交</button>
+    
+    <div id="answer"></div>
+
+    <script>
+        document.getElementById("submit").onclick = async function() {
+            const question = document.getElementById("question").value;
+            if (question.trim() === "") {
+                alert("请输入问题！");
+                return;
+            }
+
+            const response = await fetch("/get_answer", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ question })
+            });
+
+            const result = await response.json();
+            document.getElementById("answer").innerText = result.answer;
+        };
+    </script>
+
+</body>
+</html>

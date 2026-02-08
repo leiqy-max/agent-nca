@@ -1,0 +1,48 @@
+venv/
+__pycache__/
+*.pyc
+node_modules/
+.env
+.DS_Store
+dist/
+build/
+backend/uploads/
+uploads/
+db_data/
+ollama_data/
+data/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+nohup.out
+
+# IDE
+.idea/
+.vscode/
+
+# Runtime Data
+backend/user_images/
+user_images/
+backend/question_history.json
+question_history.json
+
+# Local Config & Secrets
+tunnel_config.yml
+start_tunnel.sh
+start_tunnel_fixed.sh
+
+# Binaries & Large Files
+tools/cloudflared
+*.tar
+*.tar.gz
+*.zip
+
+# Build artifacts
+ops-agent-linux-x64/
+build_env/
+test_run/
+*.spec
+config.yaml.bak
