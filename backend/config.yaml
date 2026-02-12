@@ -1,23 +1,19 @@
 database: 
-  host: "10.30.107.176" 
+  host: "localhost" 
   port: 5432 
-  user: "copilot_user" 
-  password: "YOUR_PASSWORD_HERE" 
-  dbname: "copilot_db" 
+  user: "ops_user" 
+  password: "ops_password" 
+  dbname: "ops_agent" 
  
 llm: 
-  provider: "deepseek-v3" 
-  api_key: "sk-m-812acabee1234ae090c301d43661231d" 
+  provider: "zhipu" 
+  api_key: "4253a3b51e584b58a82ecf9e77337c31.jOhrvpIWGqMajJKZ" 
    
-  # Chat Configuration (DeepSeek-V3 on port 9081) 
-  chat_base_url: "http://10.30.107.176:9081/v1" 
-  model: "DeepSeek-V3" 
+  # Chat Configuration
+  model: "glm-4" 
    
-  # Embedding Configuration (BAAI_bge-m3 on port 5001) 
-  # If you have a separate embedding service, configure it here. 
-  # Otherwise it will fall back to base_url (if set) or fail. 
-  embedding_base_url: "http://10.30.107.176:5001/v1" 
-  embedding_model: "BAAI_bge-m3" 
+  # Embedding Configuration
+  embedding_model: "embedding-2" 
  
 server: 
   host: "0.0.0.0" 

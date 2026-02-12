@@ -430,7 +430,7 @@ function Sidebar({ activeView, onViewChange, userRole, username, onLogout, onUpl
         { id: 'training', label: '知识录入', icon: Target },
       ]
     },
-    ...(userRole !== 'admin' ? [{
+    ...(userRole !== 'admin' && userRole !== 'guest' ? [{
       title: '运行简报',
       items: [
         { id: 'learning', label: '进化历程', icon: Database },

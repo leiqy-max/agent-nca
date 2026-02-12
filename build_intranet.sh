@@ -223,9 +223,44 @@ import os
 shutil.make_archive('ops-agent-linux-x64', 'zip', 'ops-agent-linux-x64')
 EOF
 
-# Also zip the frontend dist for separate deployment (NC Embedding)
+# 10. Package Frontend for NC Framework (demo.zip)
 if [ -d "frontend/dist" ]; then
-    echo "Creating agent-ui.zip with root directory..."
+    echo "Updating demo/agent-ui with latest frontend build..."
+    
+    # Ensure demo directory structure exists (in case it was cleaned or missing)
+    if [ ! -d "demo" ]; then
+        echo "Warning: 'demo' directory not found. Trying to restore from existing demo.zip..."
+        if [ -f "demo.zip" ]; then
+            unzip -o demo.zip -d demo/
+        else
+            echo "Error: 'demo' directory and 'demo.zip' are missing. Cannot package NC module."
+            exit 1
+        fi
+    fi
+
+    # Clear old assets in demo/agent-ui but keep the directory
+    rm -rf demo/agent-ui/*
+    mkdir -p demo/agent-ui
+    cp -r frontend/dist/* demo/agent-ui/
+    
+    # Clean up unnecessary demo files from views/
+    echo "Cleaning up unnecessary demo files from demo/views..."
+    rm -f demo/views/views-demo-Menu1*
+    rm -f demo/views/views-demo-Menu2*
+    rm -f demo/views/views-demo-TestPage*
+    
+    echo "Creating demo.zip (NC Framework Module)..."
+    "$PYTHON_BIN" <<EOF_ZIP_DEMO
+import shutil
+import os
+# Create zip from demo directory
+shutil.make_archive('demo', 'zip', 'demo')
+EOF_ZIP_DEMO
+fi
+
+# 11. Create agent-ui.zip (Standalone Frontend)
+if [ -d "frontend/dist" ]; then
+    echo "Creating agent-ui.zip..."
     # Create a temp directory for proper structure
     rm -rf agent-ui
     mkdir -p agent-ui
@@ -240,4 +275,13 @@ EOF_ZIP
     rm -rf agent-ui
 fi
 
-echo "Build complete! Output: ops-agent-linux-x64.zip, agent-ui.zip"
+# Cleanup intermediate artifacts
+echo "Cleaning up..."
+rm -rf "$BUILD_DIR"
+rm -rf "$RM_DIR"
+rm -rf "dist"
+rm -rf "build"
+rm -f "ops-agent.spec"
+rm -f "backend/ops-agent.spec"
+
+echo "Build complete! Output: ops-agent-linux-x64.zip, demo.zip, agent-ui.zip"

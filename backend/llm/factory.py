@@ -18,7 +18,10 @@ def get_llm_client(model: str = None) -> BaseLLM:
         )
     else:
         from .zhipu_client import ZhipuLLM
-        return ZhipuLLM(model=model or os.getenv("LLM_MODEL", "glm-4"))
+        return ZhipuLLM(
+            model=model or os.getenv("LLM_MODEL", "glm-4"),
+            api_key=os.getenv("LLM_API_KEY")
+        )
 
 def get_embedding_client() -> BaseEmbedding:
     provider = os.getenv("LLM_PROVIDER", "zhipu").lower()
@@ -37,4 +40,7 @@ def get_embedding_client() -> BaseEmbedding:
         )
     else:
         from .zhipu_client import ZhipuEmbedding
-        return ZhipuEmbedding(model=os.getenv("EMBEDDING_MODEL", "embedding-2"))
+        return ZhipuEmbedding(
+            model=os.getenv("EMBEDDING_MODEL", "embedding-2"),
+            api_key=os.getenv("LLM_API_KEY")
+        )

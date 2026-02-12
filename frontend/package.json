@@ -9,7 +9,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "playwright test"
   },
   "keywords": [],
   "author": "",
@@ -27,6 +28,8 @@
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.2.3",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.23",
     "postcss": "^8.5.6",

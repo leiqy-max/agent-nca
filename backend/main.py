@@ -199,6 +199,12 @@ if not os.path.exists("user_images"):
     os.makedirs("user_images")
 app.mount("/user_images", StaticFiles(directory="user_images"), name="user_images")
 
+# Mount uploads directory for file preview
+upload_dir = "uploads"
+if not os.path.exists(upload_dir):
+    os.makedirs(upload_dir)
+app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
+
 # CAPTCHA Store (In-memory for simplicity)
 CAPTCHA_STORE = {}
 
@@ -257,6 +263,8 @@ if os.path.exists(STATIC_DIR):
     app.mount("/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets")
     # Support for NC Embedding (mapped path)
     app.mount("/agent-ui/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets_embedded")
+    # Support for full NC path (when accessed directly via port 9020 but app requests this path)
+    app.mount("/m/demo/agent-ui/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets_full_nc")
 
 # 创建一个 Pydantic 模型来接收请求的 body
 class QuestionRequest(BaseModel):
@@ -281,6 +289,8 @@ async def get_index(request: Request):
 # 显示前端页面 (NC Embedding Path)
 @app.get("/agent-ui", response_class=HTMLResponse)
 @app.get("/agent-ui/", response_class=HTMLResponse)
+@app.get("/m/demo/agent-ui", response_class=HTMLResponse)
+@app.get("/m/demo/agent-ui/", response_class=HTMLResponse)
 async def get_agent_ui_index(request: Request):
     if os.path.exists(STATIC_DIR):
         return FileResponse(f"{STATIC_DIR}/index.html")

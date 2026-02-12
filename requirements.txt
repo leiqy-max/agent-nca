@@ -8,3 +8,4 @@ pgvector==0.2.5
 sqlalchemy==2.0.28
 pydantic==2.6.4
 python-multipart==0.0.9
+zhipuai>=2.0.0

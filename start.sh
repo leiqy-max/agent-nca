@@ -44,18 +44,18 @@ fi
 # 3. 启动后端
 echo -e "\n${BLUE}[1/2] 正在启动后端服务...${NC}"
 
-# 检查 8000 端口占用
-PID_8000=$(lsof -t -i:8000 -sTCP:LISTEN 2>/dev/null)
-if [ ! -z "$PID_8000" ]; then
-    echo -e "${YELLOW}[警告]${NC} 端口 8000 被占用 (PID: $PID_8000)，尝试关闭..."
-    kill -9 $PID_8000
+# 检查 9020 端口占用
+PID_9020=$(lsof -t -i:9020 -sTCP:LISTEN 2>/dev/null)
+if [ ! -z "$PID_9020" ]; then
+    echo -e "${YELLOW}[警告]${NC} 端口 9020 被占用 (PID: $PID_9020)，尝试关闭..."
+    kill -9 $PID_9020
     sleep 1
 fi
 
 cd "$PROJECT_ROOT/backend"
 # 启动后端并重定向日志
 # 注意: main.py 内部调用了 uvicorn.run
-nohup $PYTHON_CMD main.py > "$PROJECT_ROOT/backend.log" 2>&1 &
+nohup $PYTHON_CMD -u main.py > "$PROJECT_ROOT/backend.log" 2>&1 &
 BACKEND_PID=$!
 echo -e "${GREEN}[成功]${NC} 后端已启动 (PID: $BACKEND_PID)"
 echo -e "       日志文件: $PROJECT_ROOT/backend.log"
@@ -75,7 +75,7 @@ if [ ! -z "$PID_5173" ]; then
 fi
 
 cd "$PROJECT_ROOT/frontend"
-nohup VITE_API_TARGET="http://127.0.0.1:9020" npm run dev -- --host > "$PROJECT_ROOT/frontend.log" 2>&1 &
+VITE_API_TARGET="http://127.0.0.1:9020" nohup npm run dev -- --host > "$PROJECT_ROOT/frontend.log" 2>&1 &
 FRONTEND_PID=$!
 echo -e "${GREEN}[成功]${NC} 前端已启动 (PID: $FRONTEND_PID)"
 echo -e "       日志文件: $PROJECT_ROOT/frontend.log"
