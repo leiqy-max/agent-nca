@@ -9,8 +9,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "test": "playwright test"
+    "preview": "vite preview"
   },
   "keywords": [],
   "author": "",

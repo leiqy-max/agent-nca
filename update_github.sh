@@ -24,11 +24,8 @@ else
     git commit -m "$COMMIT_MSG"
 fi
 
-# 获取当前分支名称
-CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
-
 # 推送到远程仓库
-echo "Pushing to origin $CURRENT_BRANCH..."
-git push origin "$CURRENT_BRANCH"
+echo "Pushing to origin main..."
+git push origin main
 
 echo "✅ GitHub update completed successfully!"
