@@ -10,7 +10,7 @@ llm:
   api_key: "4253a3b51e584b58a82ecf9e77337c31.jOhrvpIWGqMajJKZ" 
    
   # Chat Configuration
-  model: "glm-4" 
+  model: "glm-4.7" 
    
   # Embedding Configuration
   embedding_model: "embedding-2" 

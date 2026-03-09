@@ -149,18 +149,31 @@ async def get_current_user(
     if user is None:
         # Auto-register external user
         try:
+            # Use engine.connect() for read-write operations in SQLAlchemy 2.0 style if needed, 
+            # but engine.begin() is safer for transaction management.
+            # However, nested transactions or connection handling might be tricky.
+            # Let's ensure we are not already in a transaction block from caller? 
+            # get_current_user is called by FastAPI dependency, so it should be fine.
+            
+            # Fix: Ensure role defaults to 'user' if None
+            role_to_insert = token_data.role or "user"
+            
             with engine.begin() as conn:
                 # Use a dummy password hash since they auth via SSO
                 dummy_pwd = get_password_hash(f"sso_{token_data.username}_{uuid.uuid4()}")
                 conn.execute(
                     text("INSERT INTO users (username, hashed_password, role) VALUES (:u, :p, :r)"),
-                    {"u": token_data.username, "p": dummy_pwd, "r": token_data.role or "user"}
+                    {"u": token_data.username, "p": dummy_pwd, "r": role_to_insert}
                 )
             user = get_user(token_data.username)
             print(f"[Auth] JIT Provisioned user: {token_data.username}")
         except Exception as e:
-            print(f"[Auth] Error JIT provisioning user {token_data.username}: {e}")
-            raise credentials_exception
+            # If unique constraint violation happens (race condition), try fetching again
+            print(f"[Auth] Error JIT provisioning user {token_data.username} (may exist): {e}")
+            user = get_user(token_data.username)
+            if user is None:
+                 print(f"[Auth] Critical: User {token_data.username} still not found after provision attempt.")
+                 raise credentials_exception
             
     if user is None:
         raise credentials_exception

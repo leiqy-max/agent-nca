@@ -148,6 +148,20 @@ async def lifespan(app: FastAPI):
                 )
             """))
 
+            # Create Admin Whitelist Table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS admin_whitelist (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(50) UNIQUE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            # Seed default admin in whitelist if empty
+            result = conn.execute(text("SELECT username FROM admin_whitelist WHERE username = 'admin'")).fetchone()
+            if not result:
+                conn.execute(text("INSERT INTO admin_whitelist (username) VALUES ('admin')"))
+                print("Created default admin in whitelist")
+
             # Create Uploaded Files Table (for approval workflow)
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS uploaded_files (
@@ -359,6 +373,54 @@ async def register(request: RegisterRequest):
         data={"sub": request.username, "role": "user"}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer", "role": "user", "username": request.username}
+
+class DirectLoginRequest(BaseModel):
+    username: str
+
+@api_router.post("/sso-login", response_model=Token)
+async def sso_login(request: DirectLoginRequest):
+    username = request.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username cannot be empty")
+        
+    # 1. Determine Role
+    # Check Admin Whitelist
+    role = "user"
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT username FROM admin_whitelist WHERE username = :u"), {"u": username}).fetchone()
+        if res:
+            role = "admin"
+            
+    # 2. JIT Provisioning (Ensure user exists in users table)
+    user = get_user(username)
+    if not user:
+        try:
+            with engine.begin() as conn:
+                # Use a dummy password hash since they auth via SSO
+                dummy_pwd = get_password_hash(f"sso_{username}_{uuid.uuid4()}")
+                conn.execute(
+                    text("INSERT INTO users (username, hashed_password, role) VALUES (:u, :p, :r)"),
+                    {"u": username, "p": dummy_pwd, "r": role}
+                )
+            user = get_user(username)
+            print(f"[Auth] JIT Provisioned user via SSO: {username} (Role: {role})")
+        except Exception as e:
+            print(f"[Auth] Error JIT provisioning user {username}: {e}")
+            raise HTTPException(status_code=500, detail="Login failed during provisioning")
+    else:
+        # Update role if changed (e.g. added/removed from whitelist)
+        if user.role != role:
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE users SET role = :r WHERE username = :u"), {"r": role, "u": username})
+            user.role = role # Update local object
+            print(f"[Auth] Updated role for {username} to {role}")
+
+    # 3. Issue Token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username, "role": user.role}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer", "role": user.role, "username": user.username}
 
 @api_router.post("/guest-token", response_model=Token)
 async def guest_token():

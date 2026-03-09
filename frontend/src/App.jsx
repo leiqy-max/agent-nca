@@ -2496,22 +2496,66 @@ function App() {
   const [showGlobalUpload, setShowGlobalUpload] = useState(false);
 
   useEffect(() => {
+    // 1. Try URL Params
     const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
-    const username = params.get('username');
-    const role = params.get('role');
+    let token = params.get('token');
+    let username = params.get('username');
+    // We ignore role from URL now, backend decides via whitelist
 
-    if (token && username) {
-      const authData = { 
-        token, 
-        username, 
-        role: role || 'user' 
-      };
-      localStorage.setItem('auth', JSON.stringify(authData));
-      setAuth(authData);
-      
-      // Clean URL to remove token
-      window.history.replaceState({}, document.title, window.location.pathname);
+    // 2. Try NC Global Object (for embedded mode)
+    if (!username && window.nc && window.nc.username) {
+        username = window.nc.username;
+    }
+    
+    // 3. Try to decode username from JWT if missing (legacy support)
+    if (token && !username) {
+        try {
+            const base64Url = token.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            const payload = JSON.parse(jsonPayload);
+            username = payload.sub || payload.username || payload.user_name || payload.name || payload.preferred_username;
+        } catch (e) {
+            console.error("Token decode failed", e);
+        }
+    }
+
+    // New Direct Login Logic (Trust username from context)
+    const performDirectLogin = async (user) => {
+        try {
+            console.log("[Auth] Attempting Direct Login for:", user);
+            const res = await axios.post('/sso-login', { username: user });
+            const authData = { 
+                token: res.data.access_token, 
+                username: res.data.username, 
+                role: res.data.role 
+            };
+            localStorage.setItem('auth', JSON.stringify(authData));
+            setAuth(authData);
+            console.log("[Auth] Direct Login Success:", authData);
+        } catch (err) {
+            console.error("[Auth] Direct Login Failed:", err);
+            // Fallback?
+        }
+    };
+
+    if (username && !auth) {
+        // If we have a username but no valid session, try to exchange for a real token
+        performDirectLogin(username);
+        
+        // Clean URL
+        if (params.get('username') || params.get('token')) {
+            const newUrl = window.location.pathname + window.location.hash;
+            window.history.replaceState({}, document.title, newUrl);
+        }
+    } else if (token && !auth) {
+        // Legacy token support (if backend issued it elsewhere)
+        // But we prefer sso-login to ensure role sync
+        if (username) {
+             performDirectLogin(username);
+        }
     }
   }, []);
 
