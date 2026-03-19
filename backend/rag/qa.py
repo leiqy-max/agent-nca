@@ -1,9 +1,16 @@
 # rag/qa.py
 from typing import List, Dict, Optional
 import os
+import logging
 from rag.retriever import retrieve_similar_documents
+from ocr_engine import ocr_engine
+import base64
+import tempfile
+import uuid
 
 from llm.factory import get_llm_client
+
+logger = logging.getLogger(__name__)
 
 def call_llm(prompt: str, image: Optional[str] = None) -> str:
     """
@@ -12,21 +19,23 @@ def call_llm(prompt: str, image: Optional[str] = None) -> str:
     """
     try:
         provider = os.getenv("LLM_PROVIDER", "zhipu").lower()
-        
-        # 如果有图片，强制使用支持视觉的模型
-        model = None
-        if image:
+
+        model = os.getenv("VISION_MODEL")
+        if not model and image:
             if provider == "zhipu":
                 model = "glm-4v"
             elif provider == "ollama":
-                model = "llava" # 假设 ollama 使用 llava
-        
+                model = "llava"
+            elif provider in ["deepseek-v3", "openai", "siliconflow"]:
+                # In intranet, the model name might be different. 
+                # If not provided in config.yaml, use a common generic name or the hardcoded one.
+                model = "Qwen/Qwen2.5-VL-7B-Instruct"
+
         client = get_llm_client(model=model)
-        
-        # 构造对话历史
+
         messages = []
         if image:
-            if provider == "zhipu":
+            if provider in ["zhipu", "deepseek-v3", "openai", "siliconflow"]:
                 messages = [{
                     "role": "user",
                     "content": [
@@ -35,11 +44,7 @@ def call_llm(prompt: str, image: Optional[str] = None) -> str:
                     ]
                 }]
             else:
-                # Ollama vision format might vary, simple fallback or standard
-                # 假设 Ollama 客户端能处理 content list 或者我们需要在这里适配
-                # 这里暂时假设 OllamaClient 需要适配，或者简单处理
-                # 目前主要支持 Zhipu GLM-4V
-                messages = [{"role": "user", "content": prompt, "images": [image]}] # Ollama often uses 'images' field
+                messages = [{"role": "user", "content": prompt, "images": [image]}]
         else:
             messages = [{"role": "user", "content": prompt}]
             
@@ -131,9 +136,56 @@ def build_prompt(question: str, context: str) -> str:
 """
 
 def answer_question(question: str, image: Optional[str] = None, kb_type: str = "user") -> Dict:
+    ocr_text = ""
+    if image:
+        trace_id = uuid.uuid4().hex[:8]
+        tmp_path = None
+        logger.info(f"[OCR][{trace_id}] Processing image for text extraction...")
+        try:
+            if "," in image:
+                _, encoded = image.split(",", 1)
+            else:
+                encoded = image
+
+            img_data = base64.b64decode(encoded)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                tmp.write(img_data)
+                tmp_path = tmp.name
+
+            logger.info(f"[OCR][{trace_id}] Decoded image bytes={len(img_data)} temp={tmp_path}")
+
+            # Check if ocr_engine and the inner .ocr object are available
+            ocr_text = ""
+            if ocr_engine and ocr_engine.ocr:
+                ocr_text = ocr_engine.extract_text(tmp_path)
+            else:
+                logger.warning(f"[OCR][{trace_id}] OCR engine not ready, proceeding to Vision Fallback.")
+
+            if ocr_text:
+                logger.info(f"[OCR][{trace_id}] Extracted chars={len(ocr_text)} preview={ocr_text[:80]}")
+                question = f"{question}\n\n【图片识别内容】\n{ocr_text}"
+                # 关键修复：既然本地 OCR 成功了，就不需要再让大模型处理图片了
+                # 将 image 置为 None，确保后续只调用纯语言模型
+                image = None
+            else:
+                logger.info(f"[OCR][{trace_id}] No text detected in image")
+                vision_prompt = "请提取并输出图片中的关键文字、报错码、报错上下文。仅输出识别结果，不要解释。"
+                vision_text = call_llm(vision_prompt, image=image)
+                if vision_text and not vision_text.startswith("调用 LLM 失败"):
+                    ocr_text = vision_text.strip()
+                    logger.info(f"[OCR][{trace_id}] Vision fallback chars={len(ocr_text)} preview={ocr_text[:80]}")
+                    question = f"{question}\n\n【图片识别内容】\n{ocr_text}"
+                else:
+                    logger.warning(f"[OCR][{trace_id}] Vision fallback failed: {vision_text[:120] if vision_text else ''}")
+        except Exception:
+            logger.exception(f"[OCR][{trace_id}] Failed to process image")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
     # 0. Intent Classification
-    # Skip classification if image is present (usually technical) or if explicitly technical
-    if not image:
+    # Skip classification if image/OCR is present (usually technical) or if explicitly technical
+    if not image and not ocr_text:
         intent = classify_intent(question)
         if intent == "chitchat":
             # Direct chat without retrieval
@@ -152,7 +204,11 @@ def answer_question(question: str, image: Optional[str] = None, kb_type: str = "
     # 1.4 ~= Relaxed for broader recall
     SIMILARITY_THRESHOLD = 1.45
     
-    docs = retrieve_similar_documents(question, kb_type=kb_type, top_k=5)
+    try:
+        docs = retrieve_similar_documents(question, kb_type=kb_type, top_k=5)
+    except Exception:
+        logger.exception("[RAG] Retrieval failed, fallback to direct LLM answer")
+        docs = []
 
     # Dynamic Thresholding Strategy:
     # If we find a very high-quality match (e.g., keyword match with distance 0.0 or very close vector match),

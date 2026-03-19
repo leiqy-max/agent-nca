@@ -14,5 +14,4 @@ class MockEmbedding(BaseEmbedding):
         self.model = model
 
     def embed_text(self, text: str) -> List[float]:
-        # Return a random vector of dimension 768 (common size) or 1024
-        return [random.random() for _ in range(768)]
+        return [random.random() for _ in range(1024)]

@@ -4,6 +4,45 @@
 本项目 (`agent-nca`) 旨在将智能问答助手集成到 NC 框架中，主要采用 **Iframe 嵌入** 方案，通过外层 Vue 框架加载内层 React 应用，实现无缝的用户体验。
 
 ---
+
+## 📅 2026-03-18 (前端重命名适配与单点登录 SSO 突破)
+
+### 🎯 目标
+解决 NC 框架下前端包重命名导致的加载失败问题，并实现基于 `postMessage` 握手机制的自动登录（SSO）。
+
+### ✅ 关键问题与解决方案 (Troubleshooting)
+
+#### 1. 前端包重命名危机 (Naming & Loader Conflict)
+*   **问题描述**: 尝试将模块名从 `demo` 改为 `agent-ui` 或 `agentnc` 时，NC 框架频繁报 `404` 或 `Cannot find module` 错误。
+*   **深度分析**: 通过分析 NC 框架的 `core.js` 发现，其加载逻辑深度绑定了特定的全局变量名（如 `window.webpackJsonp_demo`）和组件 ID（主视图固定为数字 ID `3`）。
+*   **解决方案**: 
+    *   **回归标准**: 放弃重命名，回退到框架已验证的 `demo` 模块名。
+    *   **注入逻辑**: 在 `build_intranet_frontend.py` 打包脚本中，通过模板注入方式，手动将 React 应用的入口封装进 `window.webpackJsonp_demo` 总线，并强制指定模块 ID 为 `3`。
+    *   **结果**: 成功绕过框架限制，页面正常加载。
+
+#### 2. 单点登录 (SSO) 握手机制实现
+*   **问题描述**: Iframe 跨域限制导致子应用无法直接抓取父窗口的用户名；且存在父窗口发送消息时子应用尚未初始化完成的竞争状态。
+*   **解决方案 (Double Handshake)**:
+    1.  **就绪信号**: React 应用在根组件 `App.jsx` 启动后立即向父窗口发送 `{ type: 'IFRAME_READY' }`。
+    2.  **数据回传**: 父窗口包装脚本 (`views-demo-agent.js`) 收到就绪信号后，从 DOM 抓取用户名并通过 `postMessage` 回传 `{ type: 'SSO_USERNAME', username: 'xxx' }`。
+    3.  **自动登录**: 子应用收到用户名后，调用后端的 `/sso-login` 接口完成身份校验与 Token 获取。
+*   **关键修复**: 将 SSO 监听逻辑从 `DashboardView` 提升至根组件 `App.jsx`，确保未登录用户也能触发握手流程。
+
+#### 3. 后端 JIT 用户供给 (Just-In-Time Provisioning)
+*   **逻辑优化**: 后端 `/sso-login` 接口实现了自动用户同步。如果 SSO 传来的用户名在本地数据库不存在，则自动创建用户。
+*   **权限管理**: 引入 `admin_whitelist` 表，自动根据白名单为新登录用户分配 `admin` 或 `user` 角色。
+
+### 🚀 构建与打包优化 (Build Optimization)
+*   **脚本升级 (`build_intranet.sh`)**:
+    *   **持久化下载**: 将 Portable Python 环境下载到根目录 `downloads/`，避免每次构建重复下载（支持断点续传）。
+    *   **按需打包**: 支持“只打后台包”模式，自动检测现有前端 `dist` 产物，大幅缩短二次构建时间。
+*   **Bug 修复**: 修复了 `main.py` 中 `sso_login` 接口因缺失 `get_user` 导入导致的 `500` 内部错误。
+
+### 📂 产物清单
+*   `demo-final-20260318.zip`: 最终版 NC 部署包，含完美适配的 SSO 握手逻辑。
+*   `ops-agent-linux-x64.zip`: 后端单文件全量包，已修复导入 Bug 并内置最新前端产物。
+
+---
 ## 📅 2026-02-12 (内网适配完善与构建优化)
 
 ### 🎯 目标

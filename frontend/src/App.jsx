@@ -175,23 +175,19 @@ function CropModal({ imageSrc, onConfirm, onCancel }) {
 function DashboardView({ userRole }) {
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState('today_questions'); // Default tab
+    const [activeTab, setActiveTab] = useState(userRole === 'admin' ? 'today_questions' : 'my_questions'); // Default tab based on role
 
     useEffect(() => {
         fetchStats();
-    }, []);
+    }, [userRole]);
 
     const fetchStats = async () => {
+        setLoading(true);
         try {
             const res = await axios.get('/api/dashboard/stats');
-            console.log("Fetched stats:", res.data);
             setStats(res.data);
-            // Set default tab based on role if needed, but today_questions works for both (mapped correctly)
-            if (userRole !== 'admin') {
-                setActiveTab('my_questions');
-            }
         } catch (e) {
-            console.error("Error fetching stats:", e);
+            console.error("Failed to fetch dashboard stats", e);
         } finally {
             setLoading(false);
         }
@@ -2496,24 +2492,80 @@ function App() {
   const [showGlobalUpload, setShowGlobalUpload] = useState(false);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
-    const username = params.get('username');
-    const role = params.get('role');
+    // New Direct Login Logic (Trust username from context)
+    const performDirectLogin = async (user) => {
+        if (!user) return;
+        try {
+            console.log("[Auth] Attempting Direct Login for:", user);
+            const res = await axios.post('/sso-login', { username: user });
+            const authData = { 
+                token: res.data.access_token, 
+                username: res.data.username, 
+                role: res.data.role 
+            };
+            localStorage.setItem('auth', JSON.stringify(authData));
+            setAuth(authData);
+            console.log("[Auth] Direct Login Success:", authData);
+        } catch (err) {
+            console.error("[Auth] Direct Login Failed:", err);
+        }
+    };
 
-    if (token && username) {
-      const authData = { 
-        token, 
-        username, 
-        role: role || 'user' 
-      };
-      localStorage.setItem('auth', JSON.stringify(authData));
-      setAuth(authData);
-      
-      // Clean URL to remove token
-      window.history.replaceState({}, document.title, window.location.pathname);
+    // 1. Try URL Params
+    const params = new URLSearchParams(window.location.search);
+    let token = params.get('token');
+    let username = params.get('username');
+
+    // 2. Try NC Global Object (for embedded mode)
+    if (!username && window.nc && window.nc.username) {
+        username = window.nc.username;
     }
-  }, []);
+    
+    // 3. Try to decode username from JWT if missing (legacy support)
+    if (token && !username) {
+        try {
+            const base64Url = token.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            const payload = JSON.parse(jsonPayload);
+            username = payload.sub || payload.username || payload.user_name || payload.name || payload.preferred_username;
+        } catch (e) {
+            console.error("Token decode failed", e);
+        }
+    }
+
+    // 4. Listen for username via postMessage (Primary handshake method)
+    const handleMessage = (event) => {
+        if (event.data && event.data.type === 'SSO_USERNAME' && event.data.username) {
+            console.log('[SSO] Received username from parent window:', event.data.username);
+            if (!auth) {
+                performDirectLogin(event.data.username);
+            }
+        }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Initial check: If we already have a username from URL/Context, use it
+    if (username && !auth) {
+        performDirectLogin(username);
+        // Clean URL
+        if (params.get('username') || params.get('token')) {
+            const newUrl = window.location.pathname + window.location.hash;
+            window.history.replaceState({}, document.title, newUrl);
+        }
+    }
+
+    // Signal to parent that we are ready (Trigger the handshake)
+    console.log('[SSO] Iframe ready, requesting username from parent...');
+    window.parent.postMessage({ type: 'IFRAME_READY' }, '*');
+
+    return () => {
+        window.removeEventListener('message', handleMessage);
+    };
+  }, [auth]);
 
   useEffect(() => {
       const handleResize = () => {

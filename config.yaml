@@ -6,14 +6,13 @@ database:
   dbname: "ops_agent" 
  
 llm: 
-  provider: "zhipu" 
-  api_key: "4253a3b51e584b58a82ecf9e77337c31.jOhrvpIWGqMajJKZ" 
-   
-  # Chat Configuration
-  model: "glm-4" 
-   
-  # Embedding Configuration
-  embedding_model: "embedding-2" 
+  provider: "siliconflow" 
+  api_key: "sk-samvmozepfrpktggnebbjbedninzviobdnxtmmwmqvwhuaxl" 
+  chat_base_url: "https://api.siliconflow.cn/v1"
+  embedding_base_url: "https://api.siliconflow.cn/v1"
+  model: "deepseek-ai/DeepSeek-V3"
+  vision_model: "Qwen/Qwen2.5-VL-32B-Instruct"
+  embedding_model: "BAAI/bge-m3" 
  
 server: 
   host: "0.0.0.0" 

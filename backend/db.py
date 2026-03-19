@@ -16,11 +16,11 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 DATABASE_URL = URL.create(
     drivername="postgresql+psycopg2",
-    username=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASSWORD"),
-    host=os.getenv("DB_HOST"),
-    port=int(os.getenv("DB_PORT")),
-    database=os.getenv("DB_NAME"),
+    username=os.getenv("DB_USER", "ops_user"),
+    password=os.getenv("DB_PASSWORD", "ops_password"),
+    host=os.getenv("DB_HOST", "localhost"),
+    port=int(os.getenv("DB_PORT", 5432)),
+    database=os.getenv("DB_NAME", "ops_agent"),
 )
 
 engine = create_engine(DATABASE_URL, echo=False)

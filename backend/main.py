@@ -3,6 +3,12 @@ import sys
 import yaml
 import csv
 import io
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s"
+)
 
 # Support for Intranet Binary: Load config.yaml if exists
 if os.path.exists("config.yaml"):
@@ -26,6 +32,7 @@ if os.path.exists("config.yaml"):
                     if "api_key" in llm: os.environ["LLM_API_KEY"] = str(llm["api_key"])
                     if "chat_base_url" in llm: os.environ["LLM_BASE_URL"] = str(llm["chat_base_url"]).strip().strip('`').strip()
                     if "model" in llm: os.environ["LLM_MODEL"] = str(llm["model"])
+                    if "vision_model" in llm: os.environ["VISION_MODEL"] = str(llm["vision_model"])
                     if "embedding_base_url" in llm: os.environ["EMBEDDING_BASE_URL"] = str(llm["embedding_base_url"]).strip().strip('`').strip()
                     if "embedding_model" in llm: os.environ["EMBEDDING_MODEL"] = str(llm["embedding_model"])
 
@@ -48,6 +55,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+logger = logging.getLogger(__name__)
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 import uuid
@@ -72,7 +81,8 @@ import json
 # Import Auth
 from auth import (
     User, UserInDB, Token, authenticate_user, create_access_token, 
-    get_current_active_user, get_password_hash, ACCESS_TOKEN_EXPIRE_MINUTES
+    get_current_active_user, get_password_hash, ACCESS_TOKEN_EXPIRE_MINUTES,
+    get_user
 )
 
 
@@ -147,6 +157,20 @@ async def lifespan(app: FastAPI):
                     role VARCHAR(20) NOT NULL
                 )
             """))
+
+            # Create Admin Whitelist Table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS admin_whitelist (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(50) UNIQUE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            # Seed default admin in whitelist if empty
+            result = conn.execute(text("SELECT username FROM admin_whitelist WHERE username = 'admin'")).fetchone()
+            if not result:
+                conn.execute(text("INSERT INTO admin_whitelist (username) VALUES ('admin')"))
+                print("Created default admin in whitelist")
 
             # Create Uploaded Files Table (for approval workflow)
             conn.execute(text("""
@@ -266,10 +290,12 @@ if os.path.exists(STATIC_DIR):
     # Support for full NC path (when accessed directly via port 9020 but app requests this path)
     app.mount("/m/demo/agent-ui/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets_full_nc")
 
+from typing import List, Optional
+
 # 创建一个 Pydantic 模型来接收请求的 body
 class QuestionRequest(BaseModel):
     question: str
-    image: str | None = None
+    image: Optional[str] = None
 
 class PolishRequest(BaseModel):
     question: str
@@ -359,6 +385,54 @@ async def register(request: RegisterRequest):
         data={"sub": request.username, "role": "user"}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer", "role": "user", "username": request.username}
+
+class DirectLoginRequest(BaseModel):
+    username: str
+
+@api_router.post("/sso-login", response_model=Token)
+async def sso_login(request: DirectLoginRequest):
+    username = request.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username cannot be empty")
+        
+    # 1. Determine Role
+    # Check Admin Whitelist
+    role = "user"
+    with engine.connect() as conn:
+        res = conn.execute(text("SELECT username FROM admin_whitelist WHERE username = :u"), {"u": username}).fetchone()
+        if res:
+            role = "admin"
+            
+    # 2. JIT Provisioning (Ensure user exists in users table)
+    user = get_user(username)
+    if not user:
+        try:
+            with engine.begin() as conn:
+                # Use a dummy password hash since they auth via SSO
+                dummy_pwd = get_password_hash(f"sso_{username}_{uuid.uuid4()}")
+                conn.execute(
+                    text("INSERT INTO users (username, hashed_password, role) VALUES (:u, :p, :r)"),
+                    {"u": username, "p": dummy_pwd, "r": role}
+                )
+            user = get_user(username)
+            print(f"[Auth] JIT Provisioned user via SSO: {username} (Role: {role})")
+        except Exception as e:
+            print(f"[Auth] Error JIT provisioning user {username}: {e}")
+            raise HTTPException(status_code=500, detail="Login failed during provisioning")
+    else:
+        # Update role if changed (e.g. added/removed from whitelist)
+        if user.role != role:
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE users SET role = :r WHERE username = :u"), {"r": role, "u": username})
+            user.role = role # Update local object
+            print(f"[Auth] Updated role for {username} to {role}")
+
+    # 3. Issue Token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username, "role": user.role}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer", "role": user.role, "username": user.username}
 
 @api_router.post("/guest-token", response_model=Token)
 async def guest_token():
@@ -1230,112 +1304,113 @@ def discard_unknown_question(id: int, current_user: User = Depends(get_current_a
 # 接受用户问题并返回答案
 @api_router.post("/get_answer")
 def get_answer(req: QuestionRequest, current_user: User = Depends(get_current_active_user)):
+    trace_id = uuid.uuid4().hex[:8]
     question = req.question
     image_data = req.image
-    
-    # Guest Limit Check
-    if current_user.role == 'guest':
-        with engine.connect() as conn:
-            count = conn.execute(text("SELECT COUNT(*) FROM chat_logs WHERE username = :u"), {"u": current_user.username}).scalar()
-            if count >= 5:
-                return {
-                    "answer": "您是访客用户，提问次数已达上限 (5次)。请注册或登录以继续使用。",
-                    "sources": [],
-                    "images": []
-                }
-    
-    # 记录问题历史 (Legacy file)
-    question_buffer.appendleft(question)
-    save_question_history(question_buffer)
-    
-    # 记录问题历史 (DB - question_history)
-    with engine.begin() as conn:
-        conn.execute(text("INSERT INTO question_history (question) VALUES (:q)"), {"q": question})
+    question_preview = (question or "").replace("\n", "\\n")[:300]
+    logger.info(
+        f"[QA][{trace_id}] request start user={current_user.username} role={current_user.role} "
+        f"q_len={len(question or '')} has_image={bool(image_data)} question='{question_preview}'"
+    )
 
-    # Save user image if present
-    saved_image_path = None
-    if image_data:
-        try:
-            # image_data is base64 string
-            if "," in image_data:
-                header, encoded = image_data.split(",", 1)
-            else:
-                encoded = image_data
-            
-            data = base64.b64decode(encoded)
-            # Simple unique filename
-            filename = f"{uuid.uuid4()}.png"
-            save_path = os.path.join("user_images", filename)
-            with open(save_path, "wb") as f:
-                f.write(data)
-            saved_image_path = filename
-        except Exception as e:
-            print(f"Error saving user image: {e}")
+    try:
+        if current_user.role == 'guest':
+            with engine.connect() as conn:
+                count = conn.execute(text("SELECT COUNT(*) FROM chat_logs WHERE username = :u"), {"u": current_user.username}).scalar()
+                if count >= 5:
+                    logger.info(f"[QA][{trace_id}] guest limit reached user={current_user.username} count={count}")
+                    return {
+                        "answer": "您是访客用户，提问次数已达上限 (5次)。请注册或登录以继续使用。",
+                        "sources": [],
+                        "images": []
+                    }
 
-    # Step 1: Check learned_qa (Direct Answer)
-    # Only do this if no image is present (assuming learned QA is text-based)
-    # If image is present, better to rely on RAG/Vision model
-    answer = None
-    sources = []
-    images = []
-    is_learned = False
-    
-    if not image_data:
-        with engine.connect() as conn:
-            # Try exact match first
+        question_buffer.appendleft(question)
+        save_question_history(question_buffer)
+
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO question_history (question) VALUES (:q)"), {"q": question})
+
+        saved_image_path = None
+        if image_data:
             try:
-                # Check if learned_qa table exists to avoid errors during initial migration
-                learned = conn.execute(text("SELECT answer FROM learned_qa WHERE question = :q ORDER BY created_at DESC LIMIT 1"), {"q": question}).fetchone()
-                if learned:
-                    answer = learned[0]
-                    is_learned = True
-            except Exception as e:
-                # Table might not exist yet if startup hasn't run fully or connection issue
-                print(f"Error checking learned_qa: {e}")
-    
-    if not answer:
-        # Step 2: Call RAG logic
-        # Pass user role to answer_question to filter KB
-        # Map guest to user KB, admin to all
-        kb_type = current_user.role
-        if kb_type == 'guest':
-            kb_type = 'user'
-        elif kb_type == 'admin':
-            kb_type = 'all'
-            
-        rag_result = answer_question(question, image_data, kb_type=kb_type)
-        if isinstance(rag_result, dict):
-            answer = rag_result.get("answer")
-            sources = rag_result.get("sources", [])
-        else:
-            answer = rag_result
-            sources = []
+                if "," in image_data:
+                    _, encoded = image_data.split(",", 1)
+                else:
+                    encoded = image_data
 
-    # Step 3: Determine Status
-    # Default status
-    status_code = "normal"
-    if is_learned:
-        status_code = "learned"
-    else:
-        # Check for unknown keywords
-        unknown_keywords = ["未在现有运维知识库中找到", "我不知道", "无法回答"]
-        for kw in unknown_keywords:
-            if kw in answer:
-                status_code = "unknown"
-                # If unknown, clear sources to avoid confusion
+                data = base64.b64decode(encoded)
+                filename = f"{uuid.uuid4()}.png"
+                save_path = os.path.join("user_images", filename)
+                with open(save_path, "wb") as f:
+                    f.write(data)
+                saved_image_path = filename
+                logger.info(f"[QA][{trace_id}] image saved file={filename} bytes={len(data)}")
+            except Exception:
+                logger.exception(f"[QA][{trace_id}] failed to save user image")
+
+        answer = None
+        sources = []
+        images = []
+        is_learned = False
+
+        if not image_data:
+            with engine.connect() as conn:
+                try:
+                    learned = conn.execute(text("SELECT answer FROM learned_qa WHERE question = :q ORDER BY created_at DESC LIMIT 1"), {"q": question}).fetchone()
+                    if learned:
+                        answer = learned[0]
+                        is_learned = True
+                        logger.info(f"[QA][{trace_id}] answered by learned_qa")
+                except Exception:
+                    logger.exception(f"[QA][{trace_id}] error checking learned_qa")
+
+        if not answer:
+            kb_type = current_user.role
+            if kb_type == 'guest':
+                kb_type = 'user'
+            elif kb_type == 'admin':
+                kb_type = 'all'
+
+            logger.info(f"[QA][{trace_id}] invoking rag kb_type={kb_type}")
+            rag_result = answer_question(question, image_data, kb_type=kb_type)
+            if isinstance(rag_result, dict):
+                answer = rag_result.get("answer")
+                sources = rag_result.get("sources", [])
+            else:
+                answer = rag_result
                 sources = []
-                break
+            logger.info(f"[QA][{trace_id}] rag done answer_len={len(answer or '')} sources={len(sources)}")
 
-        # Log chat to DB (with username, image_path, status, sources)
-    question_id = None
-    with engine.begin() as conn:
-        result = conn.execute(
-            text("INSERT INTO chat_logs (question, answer, username, image_path, status, sources) VALUES (:q, :a, :u, :i, :s, :src) RETURNING id"),
-            {"q": question, "a": answer, "u": current_user.username, "i": saved_image_path, "s": status_code, "src": json.dumps(sources)}
+        status_code = "normal"
+        if is_learned:
+            status_code = "learned"
+        else:
+            unknown_keywords = ["未在现有运维知识库中找到", "我不知道", "无法回答"]
+            for kw in unknown_keywords:
+                if kw in (answer or ""):
+                    status_code = "unknown"
+                    sources = []
+                    break
+
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("INSERT INTO chat_logs (question, answer, username, image_path, status, sources) VALUES (:q, :a, :u, :i, :s, :src) RETURNING id"),
+                {"q": question, "a": answer, "u": current_user.username, "i": saved_image_path, "s": status_code, "src": json.dumps(sources)}
+            )
+            question_id = result.scalar()
+
+        answer_preview = (answer or "").replace("\n", "\\n")[:500]
+        logger.info(
+            f"[QA][{trace_id}] request done status={status_code} question_id={question_id} "
+            f"answer_len={len(answer or '')} answer='{answer_preview}' sources={json.dumps(sources, ensure_ascii=False)[:500]}"
         )
-        question_id = result.scalar()
-
-    return {"answer": answer, "sources": sources, "images": images, "question_id": question_id}
+        return {"answer": answer, "sources": sources, "images": images, "question_id": question_id}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(f"[QA][{trace_id}] get_answer failed")
+        raise HTTPException(status_code=500, detail="问答处理失败，请稍后重试")
 
 @api_router.post("/feedback")
 def submit_feedback(request: FeedbackRequest):

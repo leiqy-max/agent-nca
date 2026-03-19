@@ -9,11 +9,11 @@ def get_llm_client(model: str = None) -> BaseLLM:
     elif provider == "mock":
         from .mock_client import MockLLM
         return MockLLM(model=model or "mock")
-    elif provider in ["deepseek-v3", "openai"]:
+    elif provider in ["deepseek-v3", "openai", "siliconflow"]:
         from .openai_client import OpenAICompatibleLLM
         return OpenAICompatibleLLM(
-            model=model or os.getenv("LLM_MODEL", "DeepSeek-V3"),
-            base_url=os.getenv("LLM_BASE_URL"),
+            model=model or os.getenv("LLM_MODEL", "deepseek-ai/DeepSeek-V3"),
+            base_url=os.getenv("LLM_BASE_URL", "https://api.siliconflow.cn/v1"),
             api_key=os.getenv("LLM_API_KEY")
         )
     else:
@@ -23,24 +23,24 @@ def get_llm_client(model: str = None) -> BaseLLM:
             api_key=os.getenv("LLM_API_KEY")
         )
 
-def get_embedding_client() -> BaseEmbedding:
+def get_embedding_client(model: str = None) -> BaseEmbedding:
     provider = os.getenv("LLM_PROVIDER", "zhipu").lower()
     if provider == "ollama":
         from .ollama_client import OllamaEmbedding
-        return OllamaEmbedding(model=os.getenv("EMBEDDING_MODEL", "nomic-embed-text"))
+        return OllamaEmbedding(model=model or os.getenv("EMBEDDING_MODEL", "m3e"))
     elif provider == "mock":
         from .mock_client import MockEmbedding
-        return MockEmbedding(model="mock")
-    elif provider in ["deepseek-v3", "openai"]:
+        return MockEmbedding(model=model or "mock")
+    elif provider in ["deepseek-v3", "openai", "siliconflow"]:
         from .openai_client import OpenAICompatibleEmbedding
         return OpenAICompatibleEmbedding(
-            model=os.getenv("EMBEDDING_MODEL", "BAAI_bge-m3"),
-            base_url=os.getenv("EMBEDDING_BASE_URL") or os.getenv("LLM_BASE_URL"),
+            model=model or os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3"),
+            base_url=os.getenv("EMBEDDING_BASE_URL", "https://api.siliconflow.cn/v1"),
             api_key=os.getenv("LLM_API_KEY")
         )
     else:
         from .zhipu_client import ZhipuEmbedding
         return ZhipuEmbedding(
-            model=os.getenv("EMBEDDING_MODEL", "embedding-2"),
+            model=model or os.getenv("EMBEDDING_MODEL", "embedding-2"),
             api_key=os.getenv("LLM_API_KEY")
         )

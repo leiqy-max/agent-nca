@@ -46,3 +46,13 @@ build_env/
 test_run/
 *.spec
 config.yaml.bak
+
+# Temporary test files
+_runtime_test/
+local_test.py
+models/
+downloads/
+frontend/agent-ui/
+frontend/demo.js
+frontend/views/
+config.yaml
