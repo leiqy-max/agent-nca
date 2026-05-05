@@ -218,6 +218,8 @@ STABLE_TECHNICAL_KEYWORDS = (
 
 
 LOW_INFORMATION_ANSWER = "\u8bf7\u8f93\u5165\u66f4\u5177\u4f53\u7684\u95ee\u9898\uff0c\u4f8b\u5982\u6545\u969c\u73b0\u8c61\u3001\u62a5\u9519\u4fe1\u606f\u6216\u9700\u8981\u67e5\u8be2\u7684\u4e1a\u52a1\u540d\u79f0\u3002"
+GREETING_ANSWER = "\u4f60\u597d\uff01\u6211\u662f Ops Agent \u52a9\u624b\uff0c\u8bf7\u8f93\u5165\u9700\u8981\u67e5\u8be2\u7684\u6545\u969c\u73b0\u8c61\u3001\u62a5\u9519\u4fe1\u606f\u6216\u4e1a\u52a1\u95ee\u9898\u3002"
+THANKS_ANSWER = "\u4e0d\u5ba2\u6c14\uff0c\u8bf7\u7ee7\u7eed\u8f93\u5165\u9700\u8981\u5904\u7406\u7684\u95ee\u9898\u3002"
 
 
 def is_low_information_question(question: str) -> bool:
@@ -229,6 +231,15 @@ def is_low_information_question(question: str) -> bool:
     if len(compact_question) <= 2 and re.fullmatch(r"[\d\W_]+", compact_question):
         return True
     return False
+
+
+def get_static_chitchat_answer(question: str) -> Optional[str]:
+    compact_question = "".join((question or "").lower().split())
+    if compact_question in {"\u4f60\u597d", "\u60a8\u597d", "hello", "hi"}:
+        return GREETING_ANSWER
+    if compact_question in {"\u8c22\u8c22", "\u8c22\u4e86", "thanks", "thankyou", "\u8f9b\u82e6\u4e86"}:
+        return THANKS_ANSWER
+    return None
 
 
 def classify_intent(question: str, trace_id: str = "-") -> str:
@@ -991,6 +1002,16 @@ def answer_question(
     if not image and not ocr_text:
         intent = classify_intent(question, trace_id=trace_id)
         if intent == "chitchat":
+            static_answer = get_static_chitchat_answer(question)
+            if static_answer:
+                elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+                logger.info("[QA][%s] chitchat_static_done elapsed_ms=%s answer=%s", trace_id, elapsed_ms, static_answer)
+                return {
+                    "answer": static_answer,
+                    "sources": [],
+                    "debug": {"intent": intent, "history_used": bool(history_text), "static_chitchat": True} if debug else None,
+                }
+
             # Direct chat without retrieval
             history_block = f"【历史对话】\n{history_text}\n\n" if history_text else ""
             chat_prompt = f"{history_block}用户输入：{question}\n\n请自然、友好地回应用户。不要提及知识库或文档。"
