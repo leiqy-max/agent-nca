@@ -1,11 +1,13 @@
 import os
 import uuid
+import base64
+import hashlib
+import hmac
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import Depends, HTTPException, status, Query, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlalchemy import text
 from db import engine
@@ -14,9 +16,11 @@ from db import engine
 SECRET_KEY = os.getenv("SECRET_KEY", "zz-agent-out-secret-key-change-me")  # In production, use environment variable
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+_bcrypt_module = None
+_bcrypt_import_failed = False
+PBKDF2_PREFIX = "pbkdf2_sha256"
+PBKDF2_ITERATIONS = 260000
 
 # Models
 class Token(BaseModel):
@@ -36,12 +40,70 @@ class User(BaseModel):
 class UserInDB(User):
     hashed_password: str
 
+def _load_bcrypt():
+    global _bcrypt_module, _bcrypt_import_failed
+    if _bcrypt_module is not None:
+        return _bcrypt_module
+    if _bcrypt_import_failed:
+        return None
+    try:
+        import bcrypt
+        _bcrypt_module = bcrypt
+        return _bcrypt_module
+    except Exception as exc:
+        _bcrypt_import_failed = True
+        print(f"[Auth] bcrypt unavailable, using PBKDF2 fallback: {exc}")
+        return None
+
+
+def _hash_pbkdf2(password):
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
+    salt_text = base64.urlsafe_b64encode(salt).decode("ascii")
+    digest_text = base64.urlsafe_b64encode(digest).decode("ascii")
+    return f"{PBKDF2_PREFIX}${PBKDF2_ITERATIONS}${salt_text}${digest_text}"
+
+
+def _verify_pbkdf2(password, hashed_password):
+    try:
+        prefix, iterations_text, salt_text, digest_text = str(hashed_password).split("$", 3)
+        if prefix != PBKDF2_PREFIX:
+            return False
+        salt = base64.urlsafe_b64decode(salt_text.encode("ascii"))
+        expected = base64.urlsafe_b64decode(digest_text.encode("ascii"))
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, int(iterations_text))
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
+
+
 # Password Utilities
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    if str(hashed_password).startswith(f"{PBKDF2_PREFIX}$"):
+        return _verify_pbkdf2(plain_password, hashed_password)
+
+    bcrypt_module = _load_bcrypt()
+    if bcrypt_module is None:
+        return False
+
+    try:
+        # Truncate password to 72 bytes for bcrypt compatibility
+        plain_bytes = plain_password.encode('utf-8')[:72]
+        hashed_bytes = hashed_password.encode('utf-8') if isinstance(hashed_password, str) else hashed_password
+        return bcrypt_module.checkpw(plain_bytes, hashed_bytes)
+    except Exception:
+        return False
 
 def get_password_hash(password):
-    return pwd_context.hash(password)
+    bcrypt_module = _load_bcrypt()
+    if bcrypt_module is None:
+        return _hash_pbkdf2(password)
+
+    # Truncate password to 72 bytes for bcrypt compatibility
+    password_bytes = password.encode('utf-8')[:72]
+    salt = bcrypt_module.gensalt()
+    hashed = bcrypt_module.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
 
 # Database Utilities
 def get_user(username: str):
@@ -160,7 +222,7 @@ async def get_current_user(
             
             with engine.begin() as conn:
                 # Use a dummy password hash since they auth via SSO
-                dummy_pwd = get_password_hash(f"sso_{token_data.username}_{uuid.uuid4()}")
+                dummy_pwd = get_password_hash(f"sso_{uuid.uuid4().hex}")
                 conn.execute(
                     text("INSERT INTO users (username, hashed_password, role) VALUES (:u, :p, :r)"),
                     {"u": token_data.username, "p": dummy_pwd, "r": role_to_insert}

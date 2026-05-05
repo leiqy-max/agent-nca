@@ -1,0 +1,40 @@
+database:
+  host: "localhost"
+  port: 5432
+  user: "ops_user"
+  password: "ops_password"
+  dbname: "ops_agent"
+  use_sqlite: false
+
+llm:
+  provider: "ollama"
+  ollama_base_url: "http://host.docker.internal:11434"
+  model: "qwen2.5:3b"
+  embedding_model: "nomic-embed-text:latest"
+  embedding_dimension: 768
+  timeout: 120
+  embedding_timeout: 120
+  classify_timeout: 15
+  classify_num_predict: 8
+  classify_num_ctx: 512
+  intent_classify_enabled: false
+  ollama_keep_alive: "30m"
+
+retrieval:
+  vector_top_k: 12
+  keyword_top_k: 20
+  bm25_top_k: 20
+  bm25_max_docs: 50000
+  fusion_top_k: 20
+  final_top_k: 5
+  rrf_k: 60
+  rerank_enabled: true
+  rerank_provider: "local"
+  rerank_endpoint: ""
+  rerank_timeout: 30
+  context_expand_window: 1
+  create_vector_index: true
+
+server:
+  host: "0.0.0.0"
+  port: 9020

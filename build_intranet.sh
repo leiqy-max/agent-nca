@@ -40,10 +40,17 @@ echo "Preparing backend/static..."
 rm -rf backend/static
 mkdir -p backend/static
 if [ -d "frontend/dist" ]; then
+    if [ -z "$(ls -A frontend/dist)" ]; then
+        echo "Error: frontend/dist exists but is empty!"
+        echo "Please run 'bash build_frontend_package.sh' first to build frontend assets."
+        exit 1
+    fi
     cp -r frontend/dist/* backend/static/
     echo "Existing frontend assets copied to backend/static."
 else
-    echo "Warning: frontend/dist not found. Backend will be built without embedded frontend."
+    echo "Error: frontend/dist not found!"
+    echo "Please run 'bash build_frontend_package.sh' first to build frontend assets."
+    exit 1
 fi
 
 # 1. Prepare Build Directory
@@ -108,24 +115,23 @@ else
     else
         "$PIP" install -r requirements.txt
     fi
-    "$PIP" install captcha passlib bcrypt pyyaml requests cffi python-dotenv python-jose jinja2 markupsafe pandas openpyxl python-docx
+    "$PIP" install captcha passlib "bcrypt==4.0.1" pyyaml requests cffi python-dotenv python-jose jinja2 markupsafe pandas openpyxl python-docx
     if [ "$ENABLE_OCR_BUNDLE" = "1" ]; then
         echo "Installing legacy PaddleOCR for better compatibility..."
         "$PIP" cache purge
         # Ensure standard opencv with GUI dependencies is NOT installed
-        "$PIP" uninstall -y opencv-python opencv-contrib-python
+        "$PIP" uninstall -y opencv-python opencv-contrib-python opencv-contrib-python-headless
         
-        # Force install ONLY headless version
-        "$PIP" install "opencv-python-headless>=4.5.1.48"
+        # Force reinstall a headless OpenCV wheel. The non-headless and headless
+        # wheels share cv2 files, so uninstalling opencv-python can remove cv2
+        # even when pip thinks opencv-python-headless is already satisfied.
+        "$PIP" install "opencv-python-headless==4.10.0.84" --force-reinstall --no-deps
         
         # Install rapidocr WITHOUT its dependencies to prevent it from pulling the wrong opencv
         "$PIP" install "rapidocr-onnxruntime>=1.3.0" --no-deps
         
         # Manually install rapidocr's other required dependencies (excluding opencv)
         "$PIP" install pyclipper Shapely PyYAML Pillow onnxruntime tqdm
-        
-        # Nuclear option: Find and destroy any trace of the non-headless opencv metadata
-        rm -rf "$VENV_DIR/lib/python3.9/site-packages/opencv_python-"*
     else
         echo "Skipping paddleocr/paddlepaddle install (OCR disabled)."
     fi
@@ -135,6 +141,10 @@ else
     # Force numpy downgrade to fix ABI compatibility with older OpenCV/PaddleOCR
     echo "Forcing numpy downgrade to fix ABI compatibility..."
     "$PIP" install "numpy<2.0.0" --force-reinstall
+    "$PIP" install "opencv-python-headless==4.10.0.84" --force-reinstall --no-deps
+
+    echo "Forcing legacy bcrypt wheel for old glibc compatibility..."
+    "$PIP" install "bcrypt==4.0.1" --force-reinstall
 fi
 
 # 5. Locate Dependencies
@@ -148,10 +158,37 @@ fi
 
 # 5.1 Validate Imports
 echo "Validating imports..."
-"$PYTHON_BIN" validate_imports.py
-if [ $? -ne 0 ]; then
-    echo "Validation failed! Stopping build."
-    exit 1
+if [ -f "validate_imports.py" ]; then
+    "$PYTHON_BIN" validate_imports.py
+else
+    "$PYTHON_BIN" <<'EOF'
+imports = [
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy",
+    "psycopg2",
+    "pgvector",
+    "pandas",
+    "openpyxl",
+    "docx",
+    "requests",
+    "jinja2",
+    "markupsafe",
+    "captcha",
+    "jose",
+    "bcrypt",
+]
+failed = []
+for name in imports:
+    try:
+        __import__(name)
+    except Exception as exc:
+        failed.append((name, str(exc)))
+if failed:
+    for name, error in failed:
+        print(f"[import failed] {name}: {error}")
+    raise SystemExit(1)
+EOF
 fi
 echo "Imports validated successfully."
 
@@ -198,6 +235,10 @@ fi
     --hidden-import pandas \
     --hidden-import openpyxl \
     --hidden-import docx \
+    --hidden-import docx.oxml \
+    --hidden-import docx.shared \
+    --hidden-import docx.enum.text \
+    --hidden-import docx_converter \
     --hidden-import tiktoken \
     --hidden-import jinja2 \
     --hidden-import markupsafe \
@@ -242,31 +283,52 @@ RM_DIR="ops-agent-package"
 rm -rf "$RM_DIR"
 mkdir -p "$RM_DIR"
 
-echo "Copying binary and creating fixed intranet config..."
+echo "Copying binary and intranet config..."
 cp "dist/ops-agent" "$RM_DIR/ops-agent"
 
-# Generate FIXED intranet configuration
-cat > "$RM_DIR/config.yaml" <<EOF
-database: 
-  host: "localhost" 
-  port: 5432 
-  user: "ops_user" 
-  password: "ops_password" 
-  dbname: "ops_agent" 
- 
-llm: 
-  provider: "openai" 
-  api_key: "not-needed" 
-  chat_base_url: "http://10.30.107.176:9081/v1"
-  embedding_base_url: "http://10.30.107.176:9081/v1"
-  model: "DeepSeek-V3" # 请根据实际内网部署的模型名称修改
-  vision_model: "Qwen/Qwen2-VL-7B-Instruct" # 请根据实际内网部署的模型名称修改
-  embedding_model: "BAAI/bge-m3" 
- 
-server: 
-  host: "0.0.0.0" 
-  port: 9020 
+# Use the checked-in intranet config template when available.
+if [ -f "config.ollama.local.yaml" ]; then
+    cp "config.ollama.local.yaml" "$RM_DIR/config.yaml"
+elif [ -f "backend/config.ollama.local.yaml" ]; then
+    cp "backend/config.ollama.local.yaml" "$RM_DIR/config.yaml"
+else
+    cat > "$RM_DIR/config.yaml" <<EOF
+database:
+  host: "127.0.0.1"
+  port: 5432
+  user: "ops_user"
+  password: "ops_password"
+  dbname: "ops_agent"
+
+llm:
+  provider: "ollama"
+  ollama_base_url: "http://127.0.0.1:11434"
+  model: "qwen2.5:3b"
+  embedding_model: "nomic-embed-text:latest"
+  embedding_dimension: 768
+  timeout: 120
+  embedding_timeout: 120
+
+retrieval:
+  vector_top_k: 12
+  keyword_top_k: 20
+  bm25_top_k: 20
+  bm25_max_docs: 50000
+  fusion_top_k: 20
+  final_top_k: 5
+  rrf_k: 60
+  rerank_enabled: true
+  rerank_provider: "local"
+  rerank_endpoint: ""
+  rerank_timeout: 30
+  context_expand_window: 1
+  create_vector_index: true
+
+server:
+  host: "0.0.0.0"
+  port: 9020
 EOF
+fi
 
 # Create simple README for binary
 cat > "$RM_DIR/README.txt" <<EOF
@@ -296,9 +358,15 @@ EOF
 
 echo "Build complete! Output: ops-agent-linux-x64.zip"
 
-# Cleanup intermediate artifacts
-echo "Cleaning up..."
-rm -rf "$BUILD_DIR"
+# Cleanup intermediate artifacts. Keep build_env by default because deleting a
+# large Linux venv on a Windows-mounted Docker volume can take a very long time.
+echo "Cleaning up generated packaging artifacts..."
 rm -rf "$RM_DIR"
 rm -rf dist build ops-agent.spec
+if [ "${CLEAN_BUILD_ENV:-0}" = "1" ]; then
+    echo "CLEAN_BUILD_ENV=1: removing build_env..."
+    rm -rf "$BUILD_DIR"
+else
+    echo "Keeping build_env cache. Set CLEAN_BUILD_ENV=1 to remove it."
+fi
 exit 0

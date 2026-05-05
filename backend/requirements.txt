@@ -4,7 +4,7 @@ aiosignal
 annotated-types
 anyio
 attrs
-bcrypt
+bcrypt==4.0.1
 cachetools
 certifi
 cffi
@@ -76,3 +76,4 @@ yarl
 zhipuai
 captcha
 python-jose[cryptography]
+rapidocr_onnxruntime
