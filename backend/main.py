@@ -52,6 +52,10 @@ if os.path.exists("config.yaml"):
                     if "classify_num_predict" in llm: os.environ["LLM_CLASSIFY_NUM_PREDICT"] = str(_clean_config_value(llm["classify_num_predict"]))
                     if "classify_num_ctx" in llm: os.environ["LLM_CLASSIFY_NUM_CTX"] = str(_clean_config_value(llm["classify_num_ctx"]))
                     if "intent_classify_enabled" in llm: os.environ["LLM_INTENT_CLASSIFY_ENABLED"] = str(_clean_config_value(llm["intent_classify_enabled"]))
+                    if "rag_timeout" in llm: os.environ["LLM_RAG_TIMEOUT"] = str(_clean_config_value(llm["rag_timeout"]))
+                    if "rag_num_predict" in llm: os.environ["LLM_RAG_NUM_PREDICT"] = str(_clean_config_value(llm["rag_num_predict"]))
+                    if "rag_num_ctx" in llm: os.environ["LLM_RAG_NUM_CTX"] = str(_clean_config_value(llm["rag_num_ctx"]))
+                    if "rag_temperature" in llm: os.environ["LLM_RAG_TEMPERATURE"] = str(_clean_config_value(llm["rag_temperature"]))
                     if "ollama_keep_alive" in llm: os.environ["OLLAMA_KEEP_ALIVE"] = str(_clean_config_value(llm["ollama_keep_alive"]))
 
                 if "retrieval" in config:
@@ -68,6 +72,8 @@ if os.path.exists("config.yaml"):
                     if "rerank_endpoint" in retrieval: os.environ["RERANK_ENDPOINT"] = str(_clean_config_value(retrieval["rerank_endpoint"]))
                     if "rerank_timeout" in retrieval: os.environ["RERANK_TIMEOUT"] = str(retrieval["rerank_timeout"])
                     if "context_expand_window" in retrieval: os.environ["CONTEXT_EXPAND_WINDOW"] = str(retrieval["context_expand_window"])
+                    if "rag_context_max_chars" in retrieval: os.environ["RAG_CONTEXT_MAX_CHARS"] = str(retrieval["rag_context_max_chars"])
+                    if "short_query_max_chars" in retrieval: os.environ["SHORT_QUERY_MAX_CHARS"] = str(retrieval["short_query_max_chars"])
                     if "create_vector_index" in retrieval: os.environ["CREATE_VECTOR_INDEX"] = str(retrieval["create_vector_index"])
 
                 # Parse Server Config
@@ -147,6 +153,10 @@ def runtime_config_summary() -> Dict[str, Any]:
         "llm_classify_num_predict": os.getenv("LLM_CLASSIFY_NUM_PREDICT"),
         "llm_classify_num_ctx": os.getenv("LLM_CLASSIFY_NUM_CTX"),
         "llm_intent_classify_enabled": os.getenv("LLM_INTENT_CLASSIFY_ENABLED"),
+        "llm_rag_timeout": os.getenv("LLM_RAG_TIMEOUT"),
+        "llm_rag_num_predict": os.getenv("LLM_RAG_NUM_PREDICT"),
+        "llm_rag_num_ctx": os.getenv("LLM_RAG_NUM_CTX"),
+        "llm_rag_temperature": os.getenv("LLM_RAG_TEMPERATURE"),
         "ollama_keep_alive": os.getenv("OLLAMA_KEEP_ALIVE"),
         "embedding_timeout": os.getenv("EMBEDDING_TIMEOUT"),
         "api_key": os.getenv("LLM_API_KEY", ""),
@@ -162,6 +172,8 @@ def runtime_config_summary() -> Dict[str, Any]:
             "rerank_provider": os.getenv("RERANK_PROVIDER"),
             "rerank_endpoint": os.getenv("RERANK_ENDPOINT"),
             "context_expand_window": os.getenv("CONTEXT_EXPAND_WINDOW"),
+            "rag_context_max_chars": os.getenv("RAG_CONTEXT_MAX_CHARS"),
+            "short_query_max_chars": os.getenv("SHORT_QUERY_MAX_CHARS"),
             "create_vector_index": os.getenv("CREATE_VECTOR_INDEX"),
         },
         "conversation": {

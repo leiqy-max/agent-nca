@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 MAX_HISTORY_CHARS = int(os.getenv("CONVERSATION_HISTORY_CHARS", "3000"))
 CONTEXT_EXPAND_WINDOW = int(os.getenv("CONTEXT_EXPAND_WINDOW", "1"))
 SOURCE_CONTEXT_MAX_CHUNKS = int(os.getenv("SOURCE_CONTEXT_MAX_CHUNKS", "8"))
+RAG_CONTEXT_MAX_CHARS = int(os.getenv("RAG_CONTEXT_MAX_CHARS", "3200"))
 UNKNOWN_ANSWER = "未在现有运维知识库中找到标准处置方案，请联系后台支撑。"
 
 def call_llm(prompt: str, image: Optional[str] = None, trace_id: str = "-", purpose: str = "answer") -> str:
@@ -81,6 +82,16 @@ def call_llm(prompt: str, image: Optional[str] = None, trace_id: str = "-", purp
                 options={
                     "num_predict": classify_num_predict,
                     "num_ctx": int(os.getenv("LLM_CLASSIFY_NUM_CTX", "512")),
+                },
+            )
+        elif provider == "ollama" and purpose == "rag_answer":
+            answer = client.chat(
+                messages,
+                temperature=float(os.getenv("LLM_RAG_TEMPERATURE", "0.1")),
+                timeout=int(os.getenv("LLM_RAG_TIMEOUT", "45")),
+                options={
+                    "num_predict": int(os.getenv("LLM_RAG_NUM_PREDICT", "256")),
+                    "num_ctx": int(os.getenv("LLM_RAG_NUM_CTX", "2048")),
                 },
             )
         else:
@@ -242,6 +253,29 @@ def get_static_chitchat_answer(question: str) -> Optional[str]:
     return None
 
 
+def is_short_exact_query(question: str) -> bool:
+    compact_question = "".join((question or "").split())
+    return 2 <= len(compact_question) <= int(os.getenv("SHORT_QUERY_MAX_CHARS", "3"))
+
+
+def doc_exactly_matches_query(doc, question: str) -> bool:
+    compact_question = _compact_match_text(question)
+    if not compact_question:
+        return False
+    meta = doc[2] or {}
+    haystack = "\n".join(
+        str(value or "")
+        for value in (
+            doc[1],
+            meta.get("filename"),
+            meta.get("source"),
+            meta.get("qa_question"),
+            meta.get("qa_answer"),
+        )
+    )
+    return compact_question in _compact_match_text(haystack)
+
+
 def classify_intent(question: str, trace_id: str = "-") -> str:
     """
     判断用户意图
@@ -290,6 +324,30 @@ def build_context(docs):
 {metadata}
 """
         )
+    return "\n".join(context_parts)
+
+
+def build_context(docs):
+    context_parts = []
+    used_chars = 0
+    for i, doc in enumerate(docs, 1):
+        content = doc[1] or ""
+        metadata = doc[2]
+        remaining = RAG_CONTEXT_MAX_CHARS - used_chars
+        if remaining <= 0:
+            break
+        if len(content) > remaining:
+            content = content[:remaining].rstrip() + "\n[内容已截断]"
+
+        context_parts.append(
+            f"""【文档 {i}】
+内容：{content}
+
+元数据：
+{metadata}
+"""
+        )
+        used_chars += len(content)
     return "\n".join(context_parts)
 
 
@@ -1068,6 +1126,17 @@ def answer_question(
     ]
     valid_docs = _expand_neighbor_docs(trace_id, valid_docs)
     valid_docs_with_source = [d for d in valid_docs if _has_document_source(d)]
+    if is_short_exact_query(question):
+        exact_docs = [doc for doc in valid_docs_with_source if doc_exactly_matches_query(doc, question)]
+        logger.info(
+            "[RETRIEVAL][%s] short_query_exact_filter query=%s before=%s after=%s",
+            trace_id,
+            question,
+            len(valid_docs_with_source),
+            len(exact_docs),
+        )
+        valid_docs_with_source = exact_docs
+        valid_docs = exact_docs
     _log_valid_docs(trace_id, valid_docs)
 
     sources = []

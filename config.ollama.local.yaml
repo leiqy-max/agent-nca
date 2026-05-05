@@ -17,6 +17,10 @@ llm:
   classify_num_predict: 8
   classify_num_ctx: 512
   intent_classify_enabled: false
+  rag_timeout: 45
+  rag_num_predict: 256
+  rag_num_ctx: 2048
+  rag_temperature: 0.1
   ollama_keep_alive: "30m"
 
 retrieval:
@@ -32,6 +36,8 @@ retrieval:
   rerank_endpoint: ""
   rerank_timeout: 30
   context_expand_window: 1
+  rag_context_max_chars: 3200
+  short_query_max_chars: 3
   create_vector_index: true
 
 server:
