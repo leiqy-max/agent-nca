@@ -1,7 +1,33 @@
 /**
  * 时间格式化工具函数
- * 将后端返回的时间字符串转换为本地时区并格式化显示
+ * 后端数据库时间通常是不带时区的 UTC 字符串，需要按 UTC 解析后显示为浏览器本地时间。
  */
+
+const parseBackendDate = (dateStr) => {
+  if (!dateStr) return null;
+  if (dateStr instanceof Date) return dateStr;
+
+  const text = String(dateStr).trim();
+  const match = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?$/
+  );
+
+  if (match) {
+    const [, year, month, day, hour = '00', minute = '00', second = '00', fraction = '0'] = match;
+    const millisecond = Number(fraction.padEnd(3, '0').slice(0, 3));
+    return new Date(Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+      millisecond
+    ));
+  }
+
+  return new Date(text);
+};
 
 /**
  * 格式化日期时间为 YYYY-MM-DD HH:mm:ss
@@ -12,7 +38,7 @@ export const formatDateTime = (dateStr) => {
   if (!dateStr) return '';
   
   try {
-    const date = new Date(dateStr);
+    const date = parseBackendDate(dateStr);
     
     // 检查日期是否有效
     if (isNaN(date.getTime())) {
@@ -43,7 +69,7 @@ export const formatDate = (dateStr) => {
   if (!dateStr) return '';
   
   try {
-    const date = new Date(dateStr);
+    const date = parseBackendDate(dateStr);
     
     if (isNaN(date.getTime())) {
       return dateStr;

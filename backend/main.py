@@ -2035,8 +2035,8 @@ def preview_document_html(doc_id: int, current_user: User = Depends(get_current_
     <div class="container">
         <h2>📄 该文件格式暂不支持在线预览</h2>
         <p class="file-info">{filename} ({ext})</p>
-        <p>支持的格式：DOCX, TXT, PDF（直接预览）</p>
-        <a href="/documents/{doc_id}">下载文件</a>
+        <p>支持的格式：DOCX, TXT, PDF 和常见图片格式。</p>
+        <p>当前访问环境可能禁止下载文件，请联系管理员转换为可在线预览格式。</p>
     </div>
 </body>
 </html>

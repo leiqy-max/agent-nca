@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import Login from './Login';
 import KnowledgeDocs from './KnowledgeDocs';
+import { formatDateTime } from './utils/timeFormat';
 import { 
   Send, User, Bot, Image as ImageIcon, Paperclip, 
   Globe, Sparkles, X, MoreHorizontal, Code, UploadCloud, FileText,
@@ -373,7 +374,7 @@ function DashboardLogsTable({ filterDate, scope }) {
                         ) : (
                             logs.map(log => (
                                 <tr key={log.id} className="hover:bg-gray-50 transition-colors text-sm">
-                                    <td className="p-3 text-gray-500 w-40">{log.created_at}</td>
+                                    <td className="p-3 text-gray-500 w-40">{formatDateTime(log.created_at)}</td>
                                     <td className="p-3 font-medium text-gray-700 w-32 truncate">{log.username}</td>
                                     <td className="p-3 text-gray-800 max-w-xs truncate" title={log.question}>{log.question}</td>
                                     <td className="p-3 text-gray-600 max-w-sm truncate" title={log.answer}>{log.answer}</td>
@@ -840,7 +841,7 @@ function AdminView() {
                                             <span className="font-medium text-gray-800">{doc.filename}</span>
                                             <div className="text-xs text-gray-500 flex space-x-2 mt-1">
                                                 <span>上传者: {doc.uploader}</span>
-                                                <span>时间: {doc.created_at}</span>
+                                                <span>时间: {formatDateTime(doc.created_at)}</span>
                                             </div>
                                         </div>
                                         <div className="flex space-x-2">
@@ -881,7 +882,7 @@ function AdminView() {
                                         <div className="flex justify-between items-start mb-2 border-b border-gray-200 pb-2">
                                             <div className="flex items-center space-x-2">
                                                 <span className="font-bold text-gray-700">{qa.username}</span>
-                                                <span className="text-gray-400 text-xs">{qa.created_at}</span>
+                                                <span className="text-gray-400 text-xs">{formatDateTime(qa.created_at)}</span>
                                             </div>
                                             <div className="flex space-x-2">
                                                 <button 
@@ -1014,7 +1015,7 @@ function LearningRecordsView({ userRole, filterScope, filterDate, embed }) {
                                             {record.status === 'approved' ? '已生效' : '待审核'}
                                         </span>
                                     </td>
-                                    <td className="p-3 text-gray-500 text-sm">{record.created_at}</td>
+                                    <td className="p-3 text-gray-500 text-sm">{formatDateTime(record.created_at)}</td>
                                     {userRole === 'admin' && (
                                         <td className="p-3 text-center">
                                             <button 
@@ -1133,7 +1134,7 @@ function UserLogsView() {
                                     <div className="flex justify-between items-start mb-2 border-b border-gray-200 pb-2">
                                         <div className="flex items-center space-x-2">
                                             <span className="font-bold text-gray-700">{log.username}</span>
-                                            <span className="text-gray-400 text-xs">{log.created_at}</span>
+                                            <span className="text-gray-400 text-xs">{formatDateTime(log.created_at)}</span>
                                         </div>
                                     </div>
                                     <div className="mb-2">
@@ -1315,7 +1316,7 @@ function GlobalLogsView() {
                             {typeLabel}
                         </span>
                         <span className="font-bold text-gray-700">{log.username}</span>
-                        <span className="text-gray-400 text-xs">{log.created_at}</span>
+                        <span className="text-gray-400 text-xs">{formatDateTime(log.created_at)}</span>
                     </div>
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusLabel}`}>
                         {log.status}
@@ -1516,7 +1517,7 @@ function UnknownQuestionsView({ userRole }) {
                                     <div className="flex justify-between items-start mb-2 border-b border-gray-200 pb-2">
                                         <div className="flex items-center space-x-2">
                                             <span className="font-bold text-gray-700">{log.username}</span>
-                                            <span className="text-gray-400 text-xs">{log.created_at}</span>
+                                            <span className="text-gray-400 text-xs">{formatDateTime(log.created_at)}</span>
                                         </div>
                                     </div>
                                     <div className="mb-2">
@@ -2333,6 +2334,15 @@ function ChatInterface({ auth, onLogout, isUserMode }) {
                     )}
 
                   </div>
+
+                  {msg.timestamp && (
+                    <div className={cn(
+                      "px-2 text-[11px] leading-none text-gray-400",
+                      msg.role === 'user' ? "text-right" : "text-left"
+                    )}>
+                      {msg.timestamp}
+                    </div>
+                  )}
                   
                   {/* 反馈按钮 */}
                   {msg.role === 'assistant' && msg.id !== 'welcome' && (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { renderAsync } from 'docx-preview';
 import { Search, FileText, Download, Eye, TrendingUp, File as FileIcon, Trash2, X, UploadCloud } from 'lucide-react';
+import { formatDateTime } from './utils/timeFormat';
 
 export default function KnowledgeDocs({ auth, onUpload }) {
     const [searchTerm, setSearchTerm] = useState('');
@@ -112,31 +112,21 @@ export default function KnowledgeDocs({ auth, onUpload }) {
         const [error, setError] = useState(null);
         const ext = doc.filename.split('.').pop().toLowerCase();
         // URL for iframe/img (needs token)
-        const fileUrl = `/documents/${doc.id}?preview=true&token=${auth?.token}`;
+        const tokenParam = encodeURIComponent(auth?.token || '');
+        const fileUrl = `/agent-api/documents/${doc.id}?preview=true&token=${tokenParam}`;
+        // Server-side preview URL for DOCX (no download needed)
+        const previewUrl = `/agent-api/documents/${doc.id}/preview?token=${tokenParam}`;
 
-        useEffect(() => {
-            if (ext === 'docx') {
-                axios.get(`/documents/${doc.id}`, { responseType: 'blob' })
-                    .then(res => {
-                        if (containerRef.current) {
-                            renderAsync(res.data, containerRef.current, containerRef.current, {
-                                className: "docx-viewer",
-                                inWrapper: true,
-                                ignoreWidth: false,
-                            }).catch(e => setError("DOCX 解析失败: " + e.message));
-                        }
-                    })
-                    .catch(e => setError("加载失败: " + e.message));
-            }
-        }, [doc]);
-
+        // 移除了 DOCX 的客户端渲染逻辑，改用服务端预渲染
         if (error) return <div className="flex items-center justify-center h-full text-red-500">{error}</div>;
 
-        if (ext === 'docx') {
-            return <div ref={containerRef} className="w-full h-full overflow-auto bg-gray-100 p-8" />;
+        // DOCX 和 TXT 使用服务端预渲染（不触发下载）
+        if (['docx', 'txt'].includes(ext)) {
+            return <iframe src={previewUrl} className="w-full h-full bg-white border-0" title="preview" />;
         }
         
-        if (['pdf', 'txt', 'png', 'jpg', 'jpeg', 'gif'].includes(ext)) {
+        // PDF 和图片使用原有方式
+        if (['pdf', 'png', 'jpg', 'jpeg', 'gif'].includes(ext)) {
             return <iframe src={fileUrl} className="w-full h-full bg-white border-0" title="preview" />;
         }
 
@@ -218,7 +208,7 @@ export default function KnowledgeDocs({ auth, onUpload }) {
                                                     <span>•</span>
                                                     <span>上传者: {doc.uploader}</span>
                                                     <span>•</span>
-                                                    <span>{new Date(doc.created_at).toLocaleDateString()}</span>
+                                                    <span>{formatDateTime(doc.created_at)}</span>
                                                     <span>•</span>
                                                     <span className="flex items-center" title="下载次数">
                                                         <Download size={10} className="mr-1" />
